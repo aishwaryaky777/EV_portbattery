@@ -44,12 +44,22 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="relative h-screen h-[100dvh] w-screen overflow-hidden bg-space-950 text-slate-100 flex flex-col justify-center items-center select-none">
+    <div className="ev-bg ev-energy-stream relative h-screen h-[100dvh] w-screen overflow-hidden text-slate-100 flex flex-col justify-center items-center select-none">
       
-      {/* High-Tech Background Ambience */}
-      <div className="absolute inset-0 bg-grid-pattern opacity-30 pointer-events-none"></div>
-      <div className="absolute -top-32 -left-32 w-80 h-80 bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none"></div>
-      <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-blue-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+      {/* EV Background Layers */}
+      {/* Fine grid overlay */}
+      <div className="absolute inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
+
+      {/* Charging station glow — top left */}
+      <div className="absolute -top-24 -left-24 w-96 h-96 bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
+      {/* Road / ground glow — bottom */}
+      <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-blue-900/10 to-transparent pointer-events-none" />
+      {/* Station power arc — top right */}
+      <div className="absolute -top-16 right-0 w-72 h-72 bg-blue-600/10 rounded-full blur-[90px] pointer-events-none" />
+      {/* EV headlight beam — center bottom */}
+      <div className="absolute -bottom-20 -right-20 w-80 h-80 bg-cyan-400/8 rounded-full blur-[110px] pointer-events-none" />
+      {/* Subtle purple volt accent */}
+      <div className="absolute top-1/2 -left-32 w-64 h-64 bg-violet-600/6 rounded-full blur-[100px] pointer-events-none" />
 
       {/* Main Screen Container - strictly 100% viewport constrained */}
       <div className="relative z-10 w-full h-full max-h-[100dvh] overflow-hidden flex flex-col">

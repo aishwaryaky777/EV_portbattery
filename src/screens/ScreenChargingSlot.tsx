@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  PlugZap, 
-  MapPin, 
-  Clock, 
-  CheckCircle, 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  PlugZap,
+  MapPin,
+  Clock,
+  CheckCircle,
   AlertCircle,
-  Activity, 
+  Activity,
   Sparkles,
   Zap,
-  Lock
+  Lock,
+  Timer,
+  Users,
+  XCircle,
 } from 'lucide-react';
 import { TopHeader } from '../components/TopHeader';
 
@@ -21,20 +24,140 @@ interface ScreenChargingSlotProps {
   onReset: () => void;
 }
 
+interface SlotBay {
+  bayId: string;
+  status: 'available' | 'occupied' | 'reserved';
+  occupiedUntilMins: number | null;
+  reservedByPass: string | null;
+}
+
 interface ChargingSlotOption {
   id: string;
   stationName: string;
   distanceKm: number;
   etaMins: number;
   chargerType: string;
-  availableTime: string;
-  waitingTime: string;
   chargingDuration: string;
-  bayId: string;
   stationLoad: string;
   reason: string;
   badge: string;
+  bays: SlotBay[];
 }
+
+interface BayAIResult {
+  aiStatus: 'book-now' | 'reserve-ahead' | 'join-queue';
+  aiMessage: string;
+  estimatedWaitMins: number;
+}
+
+interface StationQueueEntry {
+  stationId: string;
+  bayId: string;
+  passCode: string;
+  queuePosition: number;
+  estimatedWaitMins: number;
+}
+
+function computeSlotIntelligence(bay: SlotBay, userEtaMins: number): BayAIResult {
+  if (bay.status === 'available') {
+    return {
+      aiStatus: 'book-now',
+      aiMessage: 'Book Now — slot is open',
+      estimatedWaitMins: 0,
+    };
+  }
+
+  const effectiveUntil =
+    bay.status === 'reserved'
+      ? 20
+      : (bay.occupiedUntilMins ?? 0);
+
+  if (bay.status === 'occupied' && effectiveUntil <= userEtaMins) {
+    return {
+      aiStatus: 'reserve-ahead',
+      aiMessage: `Reserve Ahead — free in ~${effectiveUntil}m`,
+      estimatedWaitMins: 0,
+    };
+  }
+
+  // join-queue
+  const wait = effectiveUntil - userEtaMins;
+  return {
+    aiStatus: 'join-queue',
+    aiMessage: `Queue — ~${wait}m wait after arrival`,
+    estimatedWaitMins: wait,
+  };
+}
+
+function generatePassCode(): string {
+  return `SLOT-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+const build2WStations = (): ChargingSlotOption[] => [
+  {
+    id: 'station-2w-1',
+    stationName: 'VoltHub North Metro Express',
+    distanceKm: 1.2,
+    etaMins: 3,
+    chargerType: 'VoltFast 7.4 kW AC Smart Dock',
+    chargingDuration: '14 mins (~28 km)',
+    stationLoad: 'Low Load (22%)',
+    reason: 'Fastest arrival corridor, zero queue, high-efficiency 7.4kW thermal-regulated dock.',
+    badge: 'Fastest Arrival • 0 Min Wait',
+    bays: [
+      { bayId: 'BAY-A', status: 'occupied', occupiedUntilMins: 10, reservedByPass: null },
+      { bayId: 'BAY-B', status: 'available', occupiedUntilMins: null, reservedByPass: null },
+    ],
+  },
+  {
+    id: 'station-2w-2',
+    stationName: 'VoltHub EcoPark Solar Grid',
+    distanceKm: 2.1,
+    etaMins: 5,
+    chargerType: 'VoltFast 3.3 kW Dual Dock',
+    chargingDuration: '18 mins (~30 km)',
+    stationLoad: 'Minimal Load (15%)',
+    reason: '100% solar microgrid power, off-peak zero tariff, sheltered bay.',
+    badge: 'Eco Green Tier',
+    bays: [
+      { bayId: 'BAY-A', status: 'occupied', occupiedUntilMins: 8, reservedByPass: null },
+      { bayId: 'BAY-B', status: 'occupied', occupiedUntilMins: 22, reservedByPass: null },
+    ],
+  },
+];
+
+const build4WStations = (): ChargingSlotOption[] => [
+  {
+    id: 'station-4w-1',
+    stationName: 'VoltHub Express FastGrid',
+    distanceKm: 1.6,
+    etaMins: 4,
+    chargerType: '50 kW CCS2 Ultra-DC',
+    chargingDuration: '11 mins (~30 km)',
+    stationLoad: 'Moderate Load (35%)',
+    reason: 'Fastest arrival route, 50kW CCS2 compatibility, zero-car queue, active liquid cooling.',
+    badge: 'Fastest DC Route • Zero Queue',
+    bays: [
+      { bayId: 'BAY-A', status: 'available', occupiedUntilMins: null, reservedByPass: null },
+      { bayId: 'BAY-B', status: 'occupied', occupiedUntilMins: 6, reservedByPass: null },
+    ],
+  },
+  {
+    id: 'station-4w-2',
+    stationName: 'VoltHub West Highway Gateway',
+    distanceKm: 2.8,
+    etaMins: 7,
+    chargerType: '60 kW CCS2 Dual-Gun',
+    chargingDuration: '10 mins (~30 km)',
+    stationLoad: 'Low Load (20%)',
+    reason: 'High-power 60kW DC bus, wide parking apron, 24/7 technical operator on-site.',
+    badge: 'High Power 60kW',
+    bays: [
+      { bayId: 'BAY-A', status: 'occupied', occupiedUntilMins: 15, reservedByPass: null },
+      { bayId: 'BAY-B', status: 'occupied', occupiedUntilMins: 25, reservedByPass: null },
+    ],
+  },
+];
 
 export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
   vehicleType,
@@ -45,143 +168,158 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
   onReset,
 }) => {
   const [isLoading, setIsLoading] = useState(true);
-  const [slotList, setSlotList] = useState<ChargingSlotOption[]>([]);
-  const [processingSlotId, setProcessingSlotId] = useState<string | null>(null);
-  const [reservedSlotId, setReservedSlotId] = useState<string | null>(null);
-  const [bookingPassCode, setBookingPassCode] = useState<string | null>(null);
+  const [stationList, setStationList] = useState<ChargingSlotOption[]>([]);
+  const [reservedBay, setReservedBay] = useState<{ stationId: string; bayId: string; passCode: string } | null>(null);
+  const [queueEntry, setQueueEntry] = useState<StationQueueEntry | null>(null);
+  const [processingKey, setProcessingKey] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // tickCount triggers re-render when timer fires so AI results recalculate
+  const [tickCount, setTickCount] = useState(0);
 
-  // Recommendations calculated based on vehicle category and location/route
-  const initialRecommendations: ChargingSlotOption[] = vehicleType === '2W'
-    ? [
-        {
-          id: 'slot-2w-1',
-          stationName: 'VoltHub North Metro Express',
-          distanceKm: 1.2,
-          etaMins: 3,
-          chargerType: 'VoltFast 7.4 kW AC Smart Dock',
-          availableTime: 'Immediate Access (Slot Open)',
-          waitingTime: '0 min wait (Bay 03 Ready)',
-          chargingDuration: '14 mins (~28 km emergency boost)',
-          bayId: 'BAY-03 (AC Rapid)',
-          stationLoad: 'Low Load (22%)',
-          reason: 'Fastest arrival corridor, zero queue, high-efficiency 7.4kW thermal-regulated dock.',
-          badge: 'Fastest Arrival • 0 Min Wait',
-        },
-        {
-          id: 'slot-2w-2',
-          stationName: 'VoltHub EcoPark Solar Grid',
-          distanceKm: 2.1,
-          etaMins: 5,
-          chargerType: 'VoltFast 3.3 kW Dual Dock',
-          availableTime: 'Immediate Access',
-          waitingTime: '1 min wait (Bay 01 Open)',
-          chargingDuration: '18 mins (~30 km boost)',
-          bayId: 'BAY-01 (Eco Solar)',
-          stationLoad: 'Minimal Load (15%)',
-          reason: '100% solar microgrid power, off-peak zero tariff, sheltered bay.',
-          badge: 'Eco Green Tier',
-        },
-      ]
-    : [
-        {
-          id: 'slot-4w-1',
-          stationName: 'VoltHub Express FastGrid',
-          distanceKm: 1.6,
-          etaMins: 4,
-          chargerType: '50 kW CCS2 Ultra-DC Fast Coupler',
-          availableTime: 'Immediate Access',
-          waitingTime: '0 min wait (Bay 05 Ready)',
-          chargingDuration: '11 mins (~30 km emergency boost)',
-          bayId: 'BAY-05 (DC High-Rate)',
-          stationLoad: 'Moderate Load (35%)',
-          reason: 'Fastest arrival route, 50kW CCS2 compatibility, zero-car queue, active liquid cooling.',
-          badge: 'Fastest DC Route • Zero Queue',
-        },
-        {
-          id: 'slot-4w-2',
-          stationName: 'VoltHub West Highway Gateway',
-          distanceKm: 2.8,
-          etaMins: 7,
-          chargerType: '60 kW CCS2 Dual-Gun Fast Charger',
-          availableTime: 'Immediate Access',
-          waitingTime: '2 min wait (Bay 02 Pre-cleared)',
-          chargingDuration: '10 mins (~30 km boost)',
-          bayId: 'BAY-02 (DC Ultra)',
-          stationLoad: 'Low Load (20%)',
-          reason: 'High-power 60kW DC bus, wide parking apron, 24/7 technical operator on-site.',
-          badge: 'High Power 60kW',
-        },
-      ];
-
-  // Automatic recommendation generation on load
+  // Initial load
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSlotList(initialRecommendations);
+      setStationList(vehicleType === '2W' ? build2WStations() : build4WStations());
       setIsLoading(false);
     }, 450);
     return () => clearTimeout(timer);
   }, [vehicleType, currentLocation, destination]);
 
-  // Direct Immediate Reservation Process
-  const handleImmediateBooking = (option: ChargingSlotOption) => {
-    // Prevent duplicate reservations while processing
-    if (processingSlotId !== null) return;
+  // 30-second countdown timer — decrements occupiedUntilMins by 0.5
+  useEffect(() => {
+    if (isLoading) return;
+    const interval = setInterval(() => {
+      setStationList(prev =>
+        prev.map(station => ({
+          ...station,
+          bays: station.bays.map(bay => {
+            if (bay.status === 'occupied' && bay.occupiedUntilMins !== null) {
+              const newMins = Math.max(0, bay.occupiedUntilMins - 0.5);
+              return {
+                ...bay,
+                occupiedUntilMins: newMins,
+                status: newMins <= 0 ? 'available' : 'occupied',
+              };
+            }
+            return bay;
+          }),
+        }))
+      );
+      setTickCount(c => c + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [isLoading]);
 
-    // Check if slot is already reserved
-    if (reservedSlotId === option.id) {
-      setErrorMessage('This charging slot is already reserved.');
-      return;
+  // When tick fires, recalculate queue wait and notify if ready
+  useEffect(() => {
+    if (!queueEntry || stationList.length === 0) return;
+    const station = stationList.find(s => s.id === queueEntry.stationId);
+    if (!station) return;
+    const bay = station.bays.find(b => b.bayId === queueEntry.bayId);
+    if (!bay) return;
+    const ai = computeSlotIntelligence(bay, station.etaMins);
+    if (ai.estimatedWaitMins <= 0) {
+      setSuccessMessage('Your queue slot is now available! Head to the station.');
+      setQueueEntry(null);
+    } else {
+      setQueueEntry(prev => prev ? { ...prev, estimatedWaitMins: ai.estimatedWaitMins } : prev);
     }
+  }, [tickCount]);
 
-    setProcessingSlotId(option.id);
-    setErrorMessage(null);
-    setSuccessMessage(null);
+  const handleBookNow = useCallback(
+    (station: ChargingSlotOption, bay: SlotBay, aiStatus: 'book-now' | 'reserve-ahead') => {
+      const key = `${station.id}-${bay.bayId}`;
+      if (processingKey !== null) return;
+      if (reservedBay?.stationId === station.id && reservedBay?.bayId === bay.bayId) {
+        setErrorMessage('This bay is already reserved by you.');
+        return;
+      }
+      setProcessingKey(key);
+      setErrorMessage(null);
+      setSuccessMessage(null);
 
-    // Process booking directly without secondary confirmation dialogs
-    setTimeout(() => {
-      try {
-        const passId = `SLOT-${Math.floor(1000 + Math.random() * 9000)}`;
-        setBookingPassCode(passId);
-        setReservedSlotId(option.id);
-
-        // Update slot availability in state so it is no longer shown as available
-        setSlotList(prev => prev.map(s => {
-          if (s.id === option.id) {
+      setTimeout(() => {
+        const passCode = generatePassCode();
+        setStationList(prev =>
+          prev.map(s => {
+            if (s.id !== station.id) return s;
             return {
               ...s,
-              availableTime: 'Reserved by You',
-              waitingTime: 'Bay Locked',
-              badge: '✓ Reserved Slot',
+              bays: s.bays.map(b => {
+                if (b.bayId !== bay.bayId) return b;
+                return { ...b, status: 'reserved' as const, reservedByPass: passCode };
+              }),
             };
-          }
-          return s;
-        }));
+          })
+        );
+        setReservedBay({ stationId: station.id, bayId: bay.bayId, passCode });
+        setProcessingKey(null);
+        const msg =
+          aiStatus === 'reserve-ahead'
+            ? `Slot pre-reserved — it will be ready on your arrival. Pass: ${passCode}`
+            : `Charging slot reserved! ${bay.bayId} locked at ${station.stationName}. Pass: ${passCode}`;
+        setSuccessMessage(msg);
+      }, 400);
+    },
+    [processingKey, reservedBay]
+  );
 
-        setProcessingSlotId(null);
-        setSuccessMessage(`Charging slot reserved successfully! ${option.bayId} locked at ${option.stationName}. Pass: ${passId}`);
-      } catch (err) {
-        setProcessingSlotId(null);
-        setErrorMessage('Reservation failed. Please choose an alternative slot.');
-      }
-    }, 400);
-  };
+  const handleJoinQueue = useCallback(
+    (station: ChargingSlotOption, bay: SlotBay, estimatedWaitMins: number) => {
+      const key = `${station.id}-${bay.bayId}`;
+      if (processingKey !== null) return;
+      setProcessingKey(key);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      setTimeout(() => {
+        const passCode = generatePassCode();
+        const queuePosition = 1;
+        setQueueEntry({
+          stationId: station.id,
+          bayId: bay.bayId,
+          passCode,
+          queuePosition,
+          estimatedWaitMins,
+        });
+        setProcessingKey(null);
+        setSuccessMessage(`Joined queue at ${station.stationName} / ${bay.bayId}. Queue position: #${queuePosition}. Pass: ${passCode}`);
+      }, 400);
+    },
+    [processingKey]
+  );
+
+  const handleCancelQueue = useCallback(() => {
+    setQueueEntry(null);
+    setSuccessMessage(null);
+    setErrorMessage(null);
+  }, []);
+
+  // Count total available bays
+  const totalAvailableBays = stationList.reduce(
+    (acc, station) => acc + station.bays.filter(b => b.status === 'available').length,
+    0
+  );
+
+  // Show reserved count for header pill
+  const totalBays = stationList.reduce((acc, s) => acc + s.bays.length, 0);
+  const headerCount = totalBays || stationList.length * 2;
 
   return (
     <div className="h-full w-full max-w-md mx-auto flex flex-col justify-between p-4 sm:p-5 select-none animate-in fade-in">
-      
+
       {/* Top App Bar */}
-      <TopHeader 
-        currentScreen="charging-slot" 
-        onBack={onBack} 
-        stepIndicator={reservedSlotId ? 'Booked' : '3 / 3'}
+      <TopHeader
+        currentScreen="charging-slot"
+        onBack={onBack}
+        stepIndicator={reservedBay ? 'Booked' : '3 / 3'}
         vehicleType={vehicleType}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col justify-center my-auto py-2">
-        
+      <div className="flex-1 flex flex-col justify-center my-auto py-2 overflow-y-auto">
+
         {/* Loading State */}
         {isLoading && (
           <div className="flex flex-col items-center justify-center space-y-3 py-12 text-center animate-pulse">
@@ -199,10 +337,10 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
           </div>
         )}
 
-        {/* AUTOMATIC RECOMMENDATIONS & DIRECT RESERVATION */}
+        {/* Station cards + controls */}
         {!isLoading && (
           <div className="space-y-2.5 animate-in fade-in">
-            
+
             {/* Context Summary Strip */}
             <div className="p-2.5 rounded-xl bg-space-900/90 border border-slate-800 flex items-center justify-between text-xs font-mono">
               <div className="truncate max-w-[200px]">
@@ -215,7 +353,7 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
               </div>
             </div>
 
-            {/* Direct Success Message Banner */}
+            {/* Success Message Banner */}
             {successMessage && (
               <div className="p-2.5 rounded-xl bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 text-xs font-mono flex items-start gap-2 shadow-lg shadow-emerald-950/50 animate-in fade-in slide-in-from-top-1">
                 <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
@@ -234,106 +372,207 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
               </div>
             )}
 
+            {/* Header badge + title */}
             <div className="text-center space-y-0.5">
               <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-950/80 border border-blue-500/40 text-[10px] font-mono text-blue-300">
                 <Sparkles className="w-3 h-3 text-blue-400" />
-                <span>MULTIPLE CHARGING SLOTS FOUND ({slotList.length})</span>
+                <span>MULTIPLE CHARGING SLOTS FOUND ({headerCount})</span>
               </div>
               <h2 className="text-base font-bold text-white tracking-tight">
                 Recommended Charging Slots
               </h2>
             </div>
 
-            {/* Multiple Compact Cards */}
+            {/* Station Cards */}
             <div className="space-y-2">
-              {slotList.map((slot) => {
-                const isThisSlotReserved = reservedSlotId === slot.id;
-                const isThisSlotProcessing = processingSlotId === slot.id;
-                const isAnotherProcessing = processingSlotId !== null && processingSlotId !== slot.id;
+              {stationList.map(station => {
+                const isStationReserved = reservedBay?.stationId === station.id;
 
                 return (
                   <div
-                    key={slot.id}
+                    key={station.id}
                     className={`p-3 rounded-2xl glass-panel-glow border transition-all space-y-2 text-xs font-mono ${
-                      isThisSlotReserved
+                      isStationReserved
                         ? 'border-emerald-500/60 bg-emerald-950/20'
                         : 'border-blue-500/30 hover:border-blue-400'
                     }`}
                   >
-                    {/* Card Header: Station & Distance */}
+                    {/* Station Header */}
                     <div className="flex items-start justify-between pb-1.5 border-b border-slate-800">
                       <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-white text-xs">{slot.stationName}</span>
-                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
-                            isThisSlotReserved
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-white text-xs">{station.stationName}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                            isStationReserved
                               ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/50'
                               : 'bg-blue-950 text-blue-300 border border-blue-500/30'
                           }`}>
-                            {slot.badge}
+                            {station.badge}
                           </span>
                         </div>
-                        <div className="text-[11px] text-cyan-300">
-                          {slot.distanceKm} km away • ~{slot.etaMins} min ETA
+                        <div className="text-[11px] text-cyan-300 mt-0.5">
+                          {station.distanceKm} km away • ~{station.etaMins} min ETA
                         </div>
                       </div>
-
-                      <span className={`text-[10px] font-bold ${
-                        isThisSlotReserved ? 'text-emerald-400' : 'text-emerald-400'
-                      }`}>
-                        {slot.waitingTime}
-                      </span>
-                    </div>
-
-                    {/* Charging Details & Explanation */}
-                    <div className="space-y-1 text-[11px]">
-                      <div className="flex justify-between text-slate-300">
-                        <span>Availability: <strong className={isThisSlotReserved ? 'text-emerald-400' : 'text-white'}>{slot.availableTime}</strong></span>
-                        <span>Bay: <strong className="text-cyan-300">{slot.bayId}</strong></span>
-                      </div>
-                      <div className="flex justify-between text-slate-400 text-[10px]">
-                        <span>Charger: <strong className="text-slate-200">{slot.chargerType}</strong></span>
-                        <span>Duration: <strong className="text-emerald-400">{slot.chargingDuration.split(' ')[0]} {slot.chargingDuration.split(' ')[1]}</strong></span>
-                      </div>
-
-                      {/* Short Reason */}
-                      <div className="p-1.5 rounded-lg bg-space-950/80 border border-slate-800 text-[10px] text-slate-300 leading-snug">
-                        <strong className="text-blue-400 block mb-0.5">Why This Slot:</strong>
-                        {slot.reason}
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-[9px] text-slate-400 uppercase">{station.stationLoad}</div>
+                        <div className="text-[10px] text-slate-300">{station.chargerType}</div>
                       </div>
                     </div>
 
-                    {/* Direct Immediate Action Button (No Second Confirmation Step) */}
-                    {isThisSlotReserved ? (
-                      <div className="w-full py-2 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-default">
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Reserved by You ({bookingPassCode})</span>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleImmediateBooking(slot)}
-                        disabled={isThisSlotProcessing || isAnotherProcessing}
-                        className="w-full py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isThisSlotProcessing ? (
-                          <>
-                            <Activity className="w-3.5 h-3.5 animate-spin" />
-                            <span>Reserving Slot...</span>
-                          </>
-                        ) : (
-                          <>
-                            <PlugZap className="w-3.5 h-3.5" />
-                            <span>Book Slot</span>
-                          </>
-                        )}
-                      </button>
-                    )}
+                    {/* Charger info row */}
+                    <div className="flex justify-between text-[10px] text-slate-400">
+                      <span>Duration: <strong className="text-emerald-400">{station.chargingDuration}</strong></span>
+                    </div>
+
+                    {/* Bay rows */}
+                    <div className="space-y-1.5">
+                      {station.bays.map(bay => {
+                        const ai = computeSlotIntelligence(bay, station.etaMins);
+                        const key = `${station.id}-${bay.bayId}`;
+                        const isProcessing = processingKey === key;
+                        const isAnotherProcessing = processingKey !== null && processingKey !== key;
+                        const isThisBayReservedByUser =
+                          reservedBay?.stationId === station.id && reservedBay?.bayId === bay.bayId;
+                        const isInQueueHere =
+                          queueEntry?.stationId === station.id && queueEntry?.bayId === bay.bayId;
+
+                        return (
+                          <div
+                            key={bay.bayId}
+                            className="p-2 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-1"
+                          >
+                            {/* Bay label + status pill */}
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">
+                                {bay.bayId}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${
+                                bay.status === 'available'
+                                  ? 'bg-emerald-950 text-emerald-300 border-emerald-500/50'
+                                  : bay.status === 'occupied'
+                                  ? 'bg-amber-950 text-amber-300 border-amber-500/50'
+                                  : 'bg-blue-950 text-blue-300 border-blue-500/30'
+                              }`}>
+                                {bay.status === 'available'
+                                  ? 'Available'
+                                  : bay.status === 'occupied'
+                                  ? `Occupied ~${bay.occupiedUntilMins?.toFixed(0)}m left`
+                                  : 'Reserved'}
+                              </span>
+                            </div>
+
+                            {/* AI recommendation line */}
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              <span className={`${
+                                ai.aiStatus === 'book-now'
+                                  ? 'text-emerald-400'
+                                  : ai.aiStatus === 'reserve-ahead'
+                                  ? 'text-cyan-400'
+                                  : 'text-violet-400'
+                              }`}>
+                                ◆ {ai.aiMessage}
+                              </span>
+                            </div>
+
+                            {/* Action button per bay */}
+                            {isThisBayReservedByUser ? (
+                              <div className="w-full py-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 font-bold text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-default">
+                                <CheckCircle className="w-3 h-3 text-emerald-400" />
+                                <span>Reserved ✓ {reservedBay?.passCode}</span>
+                              </div>
+                            ) : isInQueueHere ? (
+                              <div className="flex items-center justify-between gap-1">
+                                <div className="flex-1 py-1.5 rounded-lg bg-amber-950/70 border border-amber-500/40 text-amber-300 text-[10px] font-bold flex items-center justify-center gap-1">
+                                  <Users className="w-3 h-3" />
+                                  <span>Queue #{queueEntry?.queuePosition} • ~{queueEntry?.estimatedWaitMins}m wait</span>
+                                </div>
+                                <button
+                                  onClick={handleCancelQueue}
+                                  className="text-[9px] text-rose-400 hover:text-rose-300 underline px-1 flex-shrink-0"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : ai.aiStatus === 'book-now' || ai.aiStatus === 'reserve-ahead' ? (
+                              <button
+                                onClick={() => handleBookNow(station, bay, ai.aiStatus as 'book-now' | 'reserve-ahead')}
+                                disabled={isProcessing || isAnotherProcessing}
+                                className="w-full py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-[10px] uppercase tracking-wider shadow-md shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {isProcessing ? (
+                                  <>
+                                    <Activity className="w-3 h-3 animate-spin" />
+                                    <span>Reserving...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <PlugZap className="w-3 h-3" />
+                                    <span>Book Slot</span>
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleJoinQueue(station, bay, ai.estimatedWaitMins)}
+                                disabled={isProcessing || isAnotherProcessing || queueEntry !== null}
+                                className="w-full py-1.5 rounded-lg bg-gradient-to-r from-violet-700 to-purple-600 hover:from-violet-600 hover:to-purple-500 text-white font-bold text-[10px] uppercase tracking-wider shadow-md shadow-violet-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {isProcessing ? (
+                                  <>
+                                    <Activity className="w-3 h-3 animate-spin" />
+                                    <span>Joining...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Users className="w-3 h-3" />
+                                    <span>Join Queue</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Why this station reason */}
+                    <div className="p-1.5 rounded-lg bg-space-950/80 border border-slate-800 text-[10px] text-slate-300 leading-snug">
+                      <strong className="text-blue-400 block mb-0.5">Why This Station:</strong>
+                      {station.reason}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-
+            {/* Queue Panel — inline, shown when user is in queue */}
+            {queueEntry && (
+              <div className="p-2.5 rounded-xl bg-violet-950/80 border border-violet-500/40 text-violet-200 text-xs font-mono animate-in fade-in">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <Users className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
+                    <span>
+                      Queue Position: <strong className="text-white">#{queueEntry.queuePosition}</strong>
+                    </span>
+                    <span>|</span>
+                    <span>
+                      Est. Wait: <strong className="text-violet-300">~{queueEntry.estimatedWaitMins}m</strong>
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleCancelQueue}
+                    className="text-[10px] text-rose-400 hover:text-rose-300 flex items-center gap-0.5 underline"
+                  >
+                    <XCircle className="w-3 h-3" />
+                    Cancel Queue
+                  </button>
+                </div>
+                <div className="text-[10px] text-violet-300/80 mt-1 truncate">
+                  Station: {stationList.find(s => s.id === queueEntry.stationId)?.stationName} • Bay: {queueEntry.bayId}
+                </div>
+              </div>
+            )}
 
           </div>
         )}
@@ -342,7 +581,7 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
 
       {/* Micro Footer */}
       <div className="text-center text-[10px] font-mono text-slate-500">
-        Immediate reservation • Direct booking confirmation
+        AI Queue Management • Real-time slot tracking
       </div>
 
     </div>

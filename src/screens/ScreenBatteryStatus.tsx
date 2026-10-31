@@ -121,8 +121,8 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
       {/* App Bar */}
       <TopHeader currentScreen="battery-status" stepIndicator="1 / 3" />
 
-      {/* Main Content Area: GPS Tracker & Destination Input */}
-      <div className="flex-1 flex flex-col justify-center my-auto py-2 space-y-3.5">
+      {/* Main Content Area: Grouped Destination & Vehicle Selection (Compact, Balanced Spacing) */}
+      <div className="flex-1 flex flex-col justify-center my-auto py-2 space-y-3 sm:space-y-3.5">
         
         {/* Title Tag */}
         <div className="text-center space-y-0.5">
@@ -136,7 +136,7 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
         </div>
 
         {/* DESTINATION INPUT CARD */}
-        <div className="p-4 rounded-2xl glass-panel border border-slate-800 space-y-2.5">
+        <div className="p-3.5 sm:p-4 rounded-2xl glass-panel border border-slate-800 space-y-2 sm:space-y-2.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-mono font-bold uppercase text-slate-300 flex items-center gap-1.5">
               <Navigation className="w-3.5 h-3.5 text-cyan-400" />
@@ -153,7 +153,7 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
               value={destination}
               onChange={(e) => handleDestinationChange(e.target.value)}
               placeholder="e.g. Airport Expressway, North Hub..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-space-950 border border-slate-700 text-white text-xs font-medium placeholder-slate-500 focus:border-cyan-400 focus:outline-none transition-colors"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-space-950/90 border border-slate-700 text-white text-xs font-medium placeholder-slate-500 focus:border-cyan-400 focus:outline-none transition-colors"
             />
           </div>
 
@@ -174,59 +174,64 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
               </button>
             ))}
           </div>
+
+          {/* Emergency Range Notice */}
+          <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-mono text-slate-400 pt-1 border-t border-slate-800/80">
+            <span>Target Emergency Window:</span>
+            <span className="text-emerald-400 font-bold">25–30 km Max</span>
+          </div>
         </div>
 
-        {/* Emergency Range Notice */}
-        <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 px-1">
-          <span>Target Emergency Window:</span>
-          <span className="text-emerald-400 font-bold">25–30 km Max</span>
+        {/* Vehicle Selection Section — positioned right below destination card */}
+        <div className="space-y-1.5 sm:space-y-2 pt-0.5">
+          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 text-center font-semibold">
+            Select Vehicle Category
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+            {/* 2 Wheeler Button */}
+            <button
+              onClick={() => onSelectVehicle('2W')}
+              className="p-3 sm:p-3.5 rounded-2xl glass-panel-glow hover:border-cyan-400 flex flex-col items-center justify-center gap-1.5 sm:gap-2 group transition-all duration-200 active:scale-95 text-center"
+            >
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-110 group-hover:bg-cyan-500 group-hover:text-space-950 transition-all">
+                <Bike className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <div className="text-xs sm:text-sm font-bold text-white group-hover:text-cyan-300 transition-colors">
+                  2 Wheeler
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono">
+                  48V–72V Swappable
+                </div>
+              </div>
+            </button>
+
+            {/* 4 Wheeler Button */}
+            <button
+              onClick={() => onSelectVehicle('4W')}
+              className="p-3 sm:p-3.5 rounded-2xl glass-panel-glow hover:border-cyan-400 flex flex-col items-center justify-center gap-1.5 sm:gap-2 group transition-all duration-200 active:scale-95 text-center"
+            >
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-110 group-hover:bg-blue-500 group-hover:text-space-950 transition-all">
+                <Car className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
+                  4 Wheeler
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono">
+                  300V–400V DC Booster
+                </div>
+              </div>
+            </button>
+          </div>
         </div>
 
       </div>
 
-      {/* Bottom Section: Prominent Vehicle Buttons (PRESERVED UNCHANGED) */}
-      <div className="space-y-2 pt-2">
-        <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 text-center font-semibold">
-          Select Vehicle Category
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          {/* 2 Wheeler Button */}
-          <button
-            onClick={() => onSelectVehicle('2W')}
-            className="p-3.5 sm:p-4 rounded-2xl glass-panel-glow hover:border-cyan-400 flex flex-col items-center justify-center gap-2 group transition-all duration-200 active:scale-95 text-center"
-          >
-            <div className="w-11 h-11 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-110 group-hover:bg-cyan-500 group-hover:text-space-950 transition-all">
-              <Bike className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors">
-                2 Wheeler
-              </div>
-              <div className="text-[10px] text-slate-400 font-mono">
-                48V–72V Swappable
-              </div>
-            </div>
-          </button>
-
-          {/* 4 Wheeler Button */}
-          <button
-            onClick={() => onSelectVehicle('4W')}
-            className="p-3.5 sm:p-4 rounded-2xl glass-panel-glow hover:border-cyan-400 flex flex-col items-center justify-center gap-2 group transition-all duration-200 active:scale-95 text-center"
-          >
-            <div className="w-11 h-11 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-110 group-hover:bg-blue-500 group-hover:text-space-950 transition-all">
-              <Car className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
-                4 Wheeler
-              </div>
-              <div className="text-[10px] text-slate-400 font-mono">
-                300V–400V DC Booster
-              </div>
-            </div>
-          </button>
-        </div>
+      {/* Micro Footer matching Slides 2 and 3 for balanced vertical anchoring */}
+      <div className="text-center text-[10px] font-mono text-slate-500 py-0.5">
+        Modular swappable battery network • Instant range rescue
       </div>
 
     </div>

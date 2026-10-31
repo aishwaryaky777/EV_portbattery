@@ -3,12 +3,8 @@ import {
   MapPin, 
   Navigation, 
   BatteryCharging, 
-  ShieldCheck, 
-  CheckCircle, 
   Clock, 
   Zap, 
-  RotateCcw,
-  ArrowRight,
   Activity,
   Layers,
   Sparkles
@@ -52,7 +48,7 @@ export const ScreenBatteryTakeaway: React.FC<ScreenBatteryTakeawayProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedOption, setSelectedOption] = useState<BatteryRecommendation | null>(null);
-  const [confirmedReservation, setConfirmedReservation] = useState<BatteryRecommendation | null>(null);
+  const [reservedId, setReservedId] = useState<string | null>(null);
 
   // Target emergency distance: capped at 25-30 km max as specified
   const targetEmergencyKm = Math.min(30, Math.max(25, routeDistanceKm));
@@ -150,7 +146,8 @@ export const ScreenBatteryTakeaway: React.FC<ScreenBatteryTakeawayProps> = ({
   }, [vehicleType, currentLocation, destination]);
 
   const handleReserve = (opt: BatteryRecommendation) => {
-    setConfirmedReservation(opt);
+    if (reservedId) return; // prevent duplicate reservations
+    setReservedId(opt.id);
   };
 
   return (
@@ -159,8 +156,8 @@ export const ScreenBatteryTakeaway: React.FC<ScreenBatteryTakeawayProps> = ({
       {/* Top App Bar */}
       <TopHeader 
         currentScreen="battery-takeaway" 
-        onBack={confirmedReservation ? () => setConfirmedReservation(null) : onBack} 
-        stepIndicator={confirmedReservation ? 'Confirmed' : '3 / 3'}
+        onBack={onBack} 
+        stepIndicator="3 / 3"
         vehicleType={vehicleType}
       />
 
@@ -184,8 +181,8 @@ export const ScreenBatteryTakeaway: React.FC<ScreenBatteryTakeawayProps> = ({
           </div>
         )}
 
-        {/* STAGE 1: AUTOMATIC MULTIPLE RECOMMENDATIONS */}
-        {!isLoading && !confirmedReservation && (
+        {/* AUTOMATIC MULTIPLE RECOMMENDATIONS */}
+        {!isLoading && (
           <div className="space-y-3 animate-in fade-in">
             
             {/* Context Summary Strip */}
@@ -254,59 +251,22 @@ export const ScreenBatteryTakeaway: React.FC<ScreenBatteryTakeawayProps> = ({
                   {/* One-Click Reserve Button */}
                   <button
                     onClick={() => handleReserve(rec)}
-                    className="w-full py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-space-950 font-bold text-xs uppercase tracking-wider shadow-md shadow-cyan-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                    disabled={reservedId !== null}
+                    className={`w-full py-2 rounded-xl font-bold text-xs uppercase tracking-wider shadow-md transition-all flex items-center justify-center gap-1.5 ${
+                      reservedId === rec.id
+                        ? 'bg-emerald-600/80 text-white cursor-default shadow-emerald-500/10'
+                        : reservedId !== null
+                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed shadow-none'
+                        : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-space-950 shadow-cyan-500/20 active:scale-95'
+                    }`}
                   >
                     <BatteryCharging className="w-3.5 h-3.5" />
-                    <span>Reserve Battery</span>
+                    <span>{reservedId === rec.id ? 'Reserved ✓' : 'Reserve Battery'}</span>
                   </button>
                 </div>
               ))}
             </div>
 
-          </div>
-        )}
-
-        {/* STAGE 2: IN-SCREEN CONFIRMATION */}
-        {confirmedReservation && (
-          <div className="space-y-3 text-center animate-in zoom-in-95">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto">
-              <CheckCircle className="w-6 h-6" />
-            </div>
-
-            <div className="space-y-0.5">
-              <div className="text-xs font-mono font-bold text-emerald-400 uppercase">
-                Battery Bay {confirmedReservation.bayId} Locked
-              </div>
-              <h2 className="text-lg font-black text-white">Reservation Confirmed</h2>
-              <p className="text-[11px] text-slate-400">
-                Collect at <strong className="text-white">{confirmedReservation.stationName}</strong>
-              </p>
-            </div>
-
-            {/* PIN & Serial Pass */}
-            <div className="p-3 rounded-2xl bg-space-950 border border-cyan-500/30 max-w-xs mx-auto space-y-1 font-mono">
-              <div className="text-[10px] uppercase text-slate-400">Pickup Pass PIN</div>
-              <div className="text-xl font-black text-cyan-300 tracking-widest">
-                VLT-{Math.floor(1000 + Math.random() * 9000)}
-              </div>
-              <div className="text-[10px] text-slate-400">
-                Held for 15 mins • Serial: {confirmedReservation.moduleSerial}
-              </div>
-            </div>
-
-            {/* Return Policy Notice */}
-            <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-left text-[11px] text-slate-400">
-              <strong className="text-slate-200 block">Return Anywhere Freedom:</strong>
-              Return depleted modules to any participating station. Your security deposit ({confirmedReservation.depositAmount}) will be refunded immediately.
-            </div>
-
-            {/* Done Action */}
-            <button
-              onClick={onReset}
-              className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-space-950 font-bold text-xs uppercase tracking-wider transition-all"
-            >
-              Done • Return to Home
-            </button>
           </div>
         )}
 

@@ -14,7 +14,8 @@
   }
 
   body {
-    @apply bg-[#070A11] text-slate-100 antialiased font-sans selection:bg-cyan-500/20 selection:text-cyan-300;
+    @apply text-slate-100 antialiased font-sans selection:bg-cyan-500/20 selection:text-cyan-300;
+    background-color: #03060F;
   }
 }
 
@@ -46,6 +47,46 @@
 
 .glass-card-interactive:active {
   transform: scale(0.98);
+}
+
+/* Realistic EV-themed background — modern EV charging station environment with dark tech overlay */
+.ev-bg {
+  background-color: #03060F;
+  background-image:
+    /* High-contrast dark tech gradient overlay for flawless card & text readability */
+    linear-gradient(
+      180deg,
+      rgba(4, 8, 19, 0.85) 0%,
+      rgba(6, 12, 26, 0.80) 45%,
+      rgba(3, 7, 18, 0.90) 100%
+    ),
+    /* Soft cyan station glow */
+    radial-gradient(circle at 18% 22%, rgba(0, 229, 255, 0.16) 0%, transparent 45%),
+    /* Electric blue power arc glow */
+    radial-gradient(circle at 82% 78%, rgba(2, 132, 199, 0.18) 0%, transparent 50%),
+    /* Real EV connected to charging equipment photo */
+    url('/ev-bg.jpg');
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* Diagonal EV energy stream overlay — mounted on a pseudo-element via App */
+.ev-energy-stream::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      -55deg,
+      transparent 0px,
+      transparent 38px,
+      rgba(0, 229, 255, 0.018) 39px,
+      transparent 40px
+    );
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* Background grid */
