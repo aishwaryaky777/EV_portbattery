@@ -3,7 +3,13 @@ import {
   Navigation, 
   Bike, 
   Car, 
-  Zap
+  Zap,
+  MapPin,
+  RefreshCw,
+  AlertCircle,
+  Activity,
+  CheckCircle,
+  Search
 } from 'lucide-react';
 import { TopHeader } from '../components/TopHeader';
 
@@ -12,11 +18,16 @@ interface ScreenBatteryStatusProps {
   setCurrentLocation: (loc: string) => void;
   locationStatus: 'detecting' | 'gps' | 'manual' | 'error';
   setLocationStatus: (status: 'detecting' | 'gps' | 'manual' | 'error') => void;
+  userCoords?: { lat: number; lng: number } | null;
+  setUserCoords?: (coords: { lat: number; lng: number } | null) => void;
   destination: string;
   setDestination: (dest: string) => void;
   routeDistanceKm: number;
   setRouteDistanceKm: (km: number) => void;
   onSelectVehicle: (type: '2W' | '4W') => void;
+  onOpenMap?: () => void;
+  onRefreshLocation?: () => void;
+  isDetectingLocation?: boolean;
 }
 
 export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
@@ -24,13 +35,21 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
   setCurrentLocation,
   locationStatus,
   setLocationStatus,
+  userCoords,
+  setUserCoords,
   destination,
   setDestination,
   routeDistanceKm,
   setRouteDistanceKm,
   onSelectVehicle,
+  onOpenMap,
+  onRefreshLocation,
+  isDetectingLocation = false,
 }) => {
-  const [isDetecting, setIsDetecting] = useState(false);
+  const [localDetecting, setLocalDetecting] = useState(false);
+  const [manualInput, setManualInput] = useState('');
+  const [isGeocodingManual, setIsGeocodingManual] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
 
   // Quick destination suggestions
   const destinationSuggestions = [
@@ -43,25 +62,33 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
   // Browser Geolocation API function
   const detectLocation = () => {
     if (!navigator.geolocation) {
-      setLocationStatus('manual');
-      setCurrentLocation('Central Urban District (Manual)');
+      setLocationStatus('error');
+      setCurrentLocation('Geolocation not supported by browser');
+      if (setUserCoords) setUserCoords(null);
       return;
     }
 
-    setIsDetecting(true);
+    setLocalDetecting(true);
     setLocationStatus('detecting');
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
+        if (setUserCoords) {
+          setUserCoords({ lat: latitude, lng: longitude });
+        }
+
         try {
-          // Attempt reverse geocoding via OpenStreetMap Nominatim with 2.5s timeout
+          // Reverse geocoding via OpenStreetMap Nominatim with 3s timeout
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 2500);
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
 
           const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=14`,
-            { signal: controller.signal }
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16`,
+            { 
+              signal: controller.signal,
+              headers: { 'User-Agent': 'VoltShare-EV-App/1.0 (contact@voltshare.app)' }
+            }
           );
           clearTimeout(timeoutId);
 
@@ -77,30 +104,92 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
             setLocationStatus('gps');
           }
         } catch {
-          // Graceful fallback showing actual verified coordinates
+          // Graceful fallback to verified real GPS coordinates
           setCurrentLocation(`GPS: ${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E`);
           setLocationStatus('gps');
         } finally {
-          setIsDetecting(false);
+          setLocalDetecting(false);
         }
       },
       (error) => {
-        setIsDetecting(false);
-        setLocationStatus('manual');
-        if (!currentLocation || currentLocation === 'Detecting location...') {
-          setCurrentLocation('Downtown Tech Zone (GPS Denied)');
+        setLocalDetecting(false);
+        setLocationStatus('error');
+        if (setUserCoords) setUserCoords(null);
+
+        if (error.code === error.PERMISSION_DENIED) {
+          setCurrentLocation('Location access permission denied');
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          setCurrentLocation('GPS position unavailable');
+        } else {
+          setCurrentLocation('Location detection timed out');
         }
       },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
     );
   };
 
-  // Run location detection on initial mount if not yet detected
+  // Watch position as user moves
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (setUserCoords) {
+          setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 15000 }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [setUserCoords]);
+
+  // Initial location detection
   useEffect(() => {
     if (locationStatus === 'detecting' || !currentLocation || currentLocation === 'Detecting location...') {
       detectLocation();
     }
   }, []);
+
+  // Handle Manual Location Geocoding via Nominatim
+  const handleManualLocationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualInput.trim()) return;
+
+    setIsGeocodingManual(true);
+    setManualError(null);
+
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(manualInput.trim())}&limit=1`,
+        { headers: { 'User-Agent': 'VoltShare-EV-App/1.0 (contact@voltshare.app)' } }
+      );
+      if (res.ok) {
+        const results = await res.json();
+        if (results && results.length > 0) {
+          const first = results[0];
+          const lat = parseFloat(first.lat);
+          const lng = parseFloat(first.lon);
+          if (setUserCoords) {
+            setUserCoords({ lat, lng });
+          }
+          const shortName = first.display_name.split(',').slice(0, 2).join(',');
+          setCurrentLocation(`${shortName} (Manual)`);
+          setLocationStatus('manual');
+          setManualInput('');
+        } else {
+          setManualError('Place not found. Please try a different city or area name.');
+        }
+      }
+    } catch {
+      setManualError('Network error geocoding location. Please retry.');
+    } finally {
+      setIsGeocodingManual(false);
+    }
+  };
 
   const handleDestinationChange = (newDest: string) => {
     setDestination(newDest);
@@ -115,14 +204,20 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
     }
   };
 
+  const isDetecting = localDetecting || isDetectingLocation;
+
   return (
     <div className="h-full w-full max-w-md mx-auto flex flex-col justify-between p-4 sm:p-5 select-none animate-in fade-in">
       
-      {/* App Bar */}
-      <TopHeader currentScreen="battery-status" stepIndicator="1 / 3" />
+      {/* App Bar with Map Button */}
+      <TopHeader 
+        currentScreen="battery-status" 
+        stepIndicator="1 / 3" 
+        onOpenMap={onOpenMap}
+      />
 
       {/* Main Content Area: Grouped Destination & Vehicle Selection (Compact, Balanced Spacing) */}
-      <div className="flex-1 flex flex-col justify-center my-auto py-2 space-y-3 sm:space-y-3.5">
+      <div className="flex-1 flex flex-col justify-center my-auto py-2 space-y-2.5 sm:space-y-3">
         
         {/* Title Tag */}
         <div className="text-center space-y-0.5">
@@ -133,6 +228,85 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
           <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
             Plan Emergency Power Route
           </h2>
+        </div>
+
+        {/* LIVE GPS / LOCATION STATUS BAR */}
+        <div className="p-2.5 rounded-xl glass-panel border border-slate-800 space-y-1.5 text-xs font-mono">
+          <div className="flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5 truncate">
+              {locationStatus === 'gps' ? (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
+              ) : locationStatus === 'detecting' ? (
+                <Activity className="w-3.5 h-3.5 text-cyan-400 animate-spin flex-shrink-0" />
+              ) : locationStatus === 'error' ? (
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+              ) : (
+                <MapPin className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+              )}
+              <span className="text-[10px] uppercase text-slate-400">Location:</span>
+              <span className={`text-[11px] font-semibold truncate ${locationStatus === 'error' ? 'text-rose-300' : 'text-cyan-300'}`}>
+                {currentLocation}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {/* Refresh Location Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onRefreshLocation) onRefreshLocation();
+                  detectLocation();
+                }}
+                disabled={isDetecting}
+                title="Refresh GPS"
+                className="p-1 rounded-lg bg-slate-900 border border-slate-700 hover:border-cyan-400 text-slate-300 transition-all disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 text-cyan-400 ${isDetecting ? 'animate-spin' : ''}`} />
+              </button>
+
+              {/* View on Map Button */}
+              {onOpenMap && (
+                <button
+                  type="button"
+                  onClick={onOpenMap}
+                  title="View on Live Station Map"
+                  className="px-2 py-0.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-300 font-bold flex items-center gap-1 transition-all"
+                >
+                  <MapPin className="w-3 h-3 text-cyan-400" />
+                  <span>Map</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Manual Location Form if GPS Error / Denied */}
+          {locationStatus === 'error' && (
+            <form onSubmit={handleManualLocationSubmit} className="pt-1.5 border-t border-slate-800 space-y-1">
+              <div className="text-[10px] text-rose-300">
+                GPS access denied. Enter your city or area manually:
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  placeholder="e.g. Indiranagar, Bangalore or Downtown"
+                  className="flex-1 px-2.5 py-1 rounded-lg bg-space-950 border border-slate-700 text-white text-[11px] placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={isGeocodingManual || !manualInput.trim()}
+                  className="px-2.5 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-space-950 font-bold text-[10px] uppercase transition-all disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isGeocodingManual ? <Activity className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                  <span>Set</span>
+                </button>
+              </div>
+              {manualError && (
+                <div className="text-[10px] text-rose-400">{manualError}</div>
+              )}
+            </form>
+          )}
         </div>
 
         {/* DESTINATION INPUT CARD */}

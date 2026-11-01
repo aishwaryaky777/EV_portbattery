@@ -66,6 +66,8 @@ export interface Station {
   isLiveFeed: boolean;
   hasDropoffSlot: boolean;
   availableReturnSlots: number;
+  availabilityStatus?: string;
+  dataSource?: string;
 }
 
 export interface CompatibilityCheck {

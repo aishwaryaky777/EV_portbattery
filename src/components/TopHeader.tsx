@@ -1,11 +1,12 @@
 import React from 'react';
-import { ArrowLeft, Zap, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Zap, ShieldCheck, MapPin } from 'lucide-react';
 
 interface TopHeaderProps {
   currentScreen: 'battery-status' | 'select-service' | 'battery-takeaway' | 'charging-slot';
   onBack?: () => void;
   stepIndicator?: string;
   vehicleType?: '2W' | '4W' | null;
+  onOpenMap?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
@@ -13,6 +14,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onBack,
   stepIndicator,
   vehicleType,
+  onOpenMap,
 }) => {
   return (
     <header className="w-full flex items-center justify-between py-2 px-1 border-b border-cyan-500/15">
@@ -48,8 +50,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         )}
       </div>
 
-      {/* Right: Step Indicator & Network Status */}
+      {/* Right: Map Button, Step Indicator & Network Status */}
       <div className="flex items-center gap-2">
+        {onOpenMap && (
+          <button
+            onClick={onOpenMap}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-mono font-bold transition-all active:scale-95 shadow-sm"
+            title="Open Live EV Charging Station Map"
+          >
+            <MapPin className="w-3 h-3 text-cyan-400" />
+            <span>Map</span>
+          </button>
+        )}
         <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
           Grid Active
