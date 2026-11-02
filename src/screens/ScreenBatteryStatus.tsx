@@ -9,9 +9,23 @@ import {
   AlertCircle,
   Activity,
   CheckCircle,
-  Search
+  Search,
+  PlugZap,
+  Clock,
+  XCircle
 } from 'lucide-react';
 import { TopHeader } from '../components/TopHeader';
+
+// Must match the key used in ScreenChargingSlot.tsx
+const CHARGING_BOOKING_KEY = 'voltshare_charging_booking_v1';
+
+interface ChargingBookingRecord {
+  stationName: string;
+  slotLabel: string;
+  passCode: string;
+  bookedAt: string;
+  destination: string;
+}
 
 interface ScreenBatteryStatusProps {
   currentLocation: string;
@@ -50,6 +64,25 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
   const [manualInput, setManualInput] = useState('');
   const [isGeocodingManual, setIsGeocodingManual] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+
+  // Active charging slot booking (persisted in localStorage)
+  const [chargingBooking, setChargingBooking] = useState<ChargingBookingRecord | null>(null);
+
+  // Read booking from localStorage on mount and whenever the screen is visited
+  useEffect(() => {
+    const readBooking = () => {
+      try {
+        const raw = localStorage.getItem(CHARGING_BOOKING_KEY);
+        setChargingBooking(raw ? (JSON.parse(raw) as ChargingBookingRecord) : null);
+      } catch {
+        setChargingBooking(null);
+      }
+    };
+    readBooking();
+    // Re-read when the tab gains focus (handles page refresh and back-navigation)
+    window.addEventListener('focus', readBooking);
+    return () => window.removeEventListener('focus', readBooking);
+  }, []);
 
   // Quick destination suggestions
   const destinationSuggestions = [
@@ -205,6 +238,14 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
   };
 
   const isDetecting = localDetecting || isDetectingLocation;
+
+  // Cancel the active charging booking
+  const handleCancelChargingBooking = () => {
+    try {
+      localStorage.removeItem(CHARGING_BOOKING_KEY);
+    } catch { /* best effort */ }
+    setChargingBooking(null);
+  };
 
   return (
     <div className="h-full w-full max-w-md mx-auto flex flex-col justify-between p-4 sm:p-5 select-none animate-in fade-in">
@@ -402,6 +443,49 @@ export const ScreenBatteryStatus: React.FC<ScreenBatteryStatusProps> = ({
         </div>
 
       </div>
+
+      {/* MY BOOKING STATUS CARD — compact, near bottom, persists across refreshes */}
+      {chargingBooking && (
+        <div className="px-0 pb-1 animate-in fade-in">
+          <div className="p-2.5 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-xs font-mono space-y-1.5 shadow-lg shadow-emerald-950/40">
+            {/* Header row */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <PlugZap className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">My Booking — Confirmed</span>
+              </div>
+              <button
+                onClick={handleCancelChargingBooking}
+                title="Cancel booking"
+                className="p-0.5 rounded hover:bg-rose-950/60 text-slate-500 hover:text-rose-400 transition-colors"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {/* Booking details */}
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+              <div>
+                <div className="text-[9px] text-slate-400 uppercase">Station</div>
+                <div className="text-[10px] text-white font-semibold leading-tight truncate">{chargingBooking.stationName}</div>
+              </div>
+              <div>
+                <div className="text-[9px] text-slate-400 uppercase">Slot</div>
+                <div className="text-[10px] text-cyan-300 font-bold">{chargingBooking.slotLabel}</div>
+              </div>
+              <div>
+                <div className="text-[9px] text-slate-400 uppercase">Pass Code</div>
+                <div className="text-[10px] text-emerald-300 font-bold">{chargingBooking.passCode}</div>
+              </div>
+              <div>
+                <div className="text-[9px] text-slate-400 uppercase flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />Booked</div>
+                <div className="text-[10px] text-slate-300">
+                  {new Date(chargingBooking.bookedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Micro Footer matching Slides 2 and 3 for balanced vertical anchoring */}
       <div className="text-center text-[10px] font-mono text-slate-500 py-0.5">

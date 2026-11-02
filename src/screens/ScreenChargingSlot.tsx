@@ -15,13 +15,24 @@ import {
 } from 'lucide-react';
 import { TopHeader } from '../components/TopHeader';
 
+// localStorage key for persisting the confirmed charging slot booking
+const CHARGING_BOOKING_KEY = 'voltshare_charging_booking_v1';
+
+export interface ChargingBookingRecord {
+  stationName: string;
+  slotLabel: string;   // "Charging Station 1" or "Charging Station 2"
+  passCode: string;
+  bookedAt: string;    // ISO timestamp
+  destination: string;
+}
+
 interface ScreenChargingSlotProps {
   vehicleType: '2W' | '4W';
   currentLocation: string;
   destination: string;
   routeDistanceKm: number;
   onBack: () => void;
-  onReset: () => void;
+  onReset: () => void;   // used to navigate home after booking
 }
 
 interface SlotBay {
@@ -91,6 +102,13 @@ function computeSlotIntelligence(bay: SlotBay, userEtaMins: number): BayAIResult
 
 function generatePassCode(): string {
   return `SLOT-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+// Maps internal bayId to user-facing display label
+function bayDisplayLabel(bayId: string): string {
+  if (bayId === 'BAY-A') return 'Charging Station 1';
+  if (bayId === 'BAY-B') return 'Charging Station 2';
+  return bayId;
 }
 
 const build2WStations = (): ChargingSlotOption[] => [
@@ -176,6 +194,8 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   // tickCount triggers re-render when timer fires so AI results recalculate
   const [tickCount, setTickCount] = useState(0);
+  // Auto-navigate countdown (seconds) after confirmed booking
+  const [autoNavCountdown, setAutoNavCountdown] = useState<number | null>(null);
 
   // Initial load
   useEffect(() => {
@@ -227,6 +247,17 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
     }
   }, [tickCount]);
 
+  // Auto-navigate home 3 seconds after a confirmed (Book Now / Reserve Ahead) booking
+  useEffect(() => {
+    if (autoNavCountdown === null) return;
+    if (autoNavCountdown <= 0) {
+      onReset();
+      return;
+    }
+    const t = setTimeout(() => setAutoNavCountdown(c => (c !== null ? c - 1 : null)), 1000);
+    return () => clearTimeout(t);
+  }, [autoNavCountdown, onReset]);
+
   const handleBookNow = useCallback(
     (station: ChargingSlotOption, bay: SlotBay, aiStatus: 'book-now' | 'reserve-ahead') => {
       const key = `${station.id}-${bay.bayId}`;
@@ -255,14 +286,30 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
         );
         setReservedBay({ stationId: station.id, bayId: bay.bayId, passCode });
         setProcessingKey(null);
+        const slotLabel = bayDisplayLabel(bay.bayId);
         const msg =
           aiStatus === 'reserve-ahead'
-            ? `Slot pre-reserved — it will be ready on your arrival. Pass: ${passCode}`
-            : `Charging slot reserved! ${bay.bayId} locked at ${station.stationName}. Pass: ${passCode}`;
+            ? `${slotLabel} pre-reserved — it will be ready on your arrival. Pass: ${passCode}`
+            : `${slotLabel} reserved at ${station.stationName}. Pass: ${passCode}`;
         setSuccessMessage(msg);
+
+        // Persist the confirmed booking to localStorage so home page can display it
+        const bookingRecord: ChargingBookingRecord = {
+          stationName: station.stationName,
+          slotLabel,
+          passCode,
+          bookedAt: new Date().toISOString(),
+          destination,
+        };
+        try {
+          localStorage.setItem(CHARGING_BOOKING_KEY, JSON.stringify(bookingRecord));
+        } catch { /* storage full — best effort */ }
+
+        // Start 3-second countdown to auto-navigate home
+        setAutoNavCountdown(3);
       }, 400);
     },
-    [processingKey, reservedBay]
+    [processingKey, reservedBay, destination]
   );
 
   const handleJoinQueue = useCallback(
@@ -284,7 +331,7 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
           estimatedWaitMins,
         });
         setProcessingKey(null);
-        setSuccessMessage(`Joined queue at ${station.stationName} / ${bay.bayId}. Queue position: #${queuePosition}. Pass: ${passCode}`);
+        setSuccessMessage(`Joined queue at ${station.stationName} / ${bayDisplayLabel(bay.bayId)}. Queue position: #${queuePosition}. Pass: ${passCode}`);
       }, 400);
     },
     [processingKey]
@@ -357,9 +404,15 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
             {successMessage && (
               <div className="p-2.5 rounded-xl bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 text-xs font-mono flex items-start gap-2 shadow-lg shadow-emerald-950/50 animate-in fade-in slide-in-from-top-1">
                 <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <div className="leading-snug">
+                <div className="leading-snug flex-1">
                   <div className="font-bold text-white text-[11px]">Charging slot reserved successfully!</div>
                   <div className="text-[10px] text-emerald-300 mt-0.5">{successMessage}</div>
+                  {autoNavCountdown !== null && autoNavCountdown > 0 && (
+                    <div className="text-[10px] text-cyan-300 mt-1 flex items-center gap-1">
+                      <Timer className="w-3 h-3 text-cyan-400" />
+                      Returning to home in {autoNavCountdown}s…
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -425,8 +478,8 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
                       <span>Duration: <strong className="text-emerald-400">{station.chargingDuration}</strong></span>
                     </div>
 
-                    {/* Bay rows */}
-                    <div className="space-y-1.5">
+                    {/* Bay cards — horizontal side-by-side layout */}
+                    <div className="grid grid-cols-2 gap-2">
                       {station.bays.map(bay => {
                         const ai = computeSlotIntelligence(bay, station.etaMins);
                         const key = `${station.id}-${bay.bayId}`;
@@ -436,18 +489,26 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
                           reservedBay?.stationId === station.id && reservedBay?.bayId === bay.bayId;
                         const isInQueueHere =
                           queueEntry?.stationId === station.id && queueEntry?.bayId === bay.bayId;
+                        // Freeze this slot if a different slot is already confirmed
+                        const isFrozen = reservedBay !== null && !isThisBayReservedByUser;
 
                         return (
                           <div
                             key={bay.bayId}
-                            className="p-2 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-1"
+                            className={`p-2 rounded-xl border space-y-1 transition-all ${
+                              isThisBayReservedByUser
+                                ? 'bg-emerald-950/40 border-emerald-500/50'
+                                : isFrozen
+                                ? 'bg-slate-900/30 border-slate-700/30 opacity-50'
+                                : 'bg-slate-900/60 border-slate-700/50'
+                            }`}
                           >
-                            {/* Bay label + status pill */}
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">
-                                {bay.bayId}
+                            {/* Slot label + status pill */}
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[10px] font-bold text-slate-200 tracking-wide leading-tight">
+                                {bayDisplayLabel(bay.bayId)}
                               </span>
-                              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${
+                              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border self-start ${
                                 bay.status === 'available'
                                   ? 'bg-emerald-950 text-emerald-300 border-emerald-500/50'
                                   : bay.status === 'occupied'
@@ -457,39 +518,54 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
                                 {bay.status === 'available'
                                   ? 'Available'
                                   : bay.status === 'occupied'
-                                  ? `Occupied ~${bay.occupiedUntilMins?.toFixed(0)}m left`
+                                  ? `~${bay.occupiedUntilMins?.toFixed(0)}m left`
                                   : 'Reserved'}
                               </span>
                             </div>
 
                             {/* AI recommendation line */}
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              <span className={`${
-                                ai.aiStatus === 'book-now'
-                                  ? 'text-emerald-400'
-                                  : ai.aiStatus === 'reserve-ahead'
-                                  ? 'text-cyan-400'
-                                  : 'text-violet-400'
-                              }`}>
-                                ◆ {ai.aiMessage}
-                              </span>
-                            </div>
+                            {!isFrozen && (
+                              <div className="text-[9px] text-slate-400 font-mono leading-tight">
+                                <span className={`${
+                                  ai.aiStatus === 'book-now'
+                                    ? 'text-emerald-400'
+                                    : ai.aiStatus === 'reserve-ahead'
+                                    ? 'text-cyan-400'
+                                    : 'text-violet-400'
+                                }`}>
+                                  ◆ {ai.aiMessage}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Frozen indicator */}
+                            {isFrozen && (
+                              <div className="text-[9px] text-slate-500 font-mono flex items-center gap-1">
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>Booking active</span>
+                              </div>
+                            )}
 
                             {/* Action button per bay */}
                             {isThisBayReservedByUser ? (
-                              <div className="w-full py-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 font-bold text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-default">
+                              <div className="w-full py-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 font-bold text-[9px] uppercase tracking-wider flex items-center justify-center gap-1 cursor-default">
                                 <CheckCircle className="w-3 h-3 text-emerald-400" />
-                                <span>Reserved ✓ {reservedBay?.passCode}</span>
+                                <span>Reserved ✓</span>
+                              </div>
+                            ) : isFrozen ? (
+                              <div className="w-full py-1.5 rounded-lg bg-slate-900/50 border border-slate-700/40 text-slate-600 font-bold text-[9px] uppercase tracking-wider flex items-center justify-center gap-1 cursor-not-allowed">
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>Locked</span>
                               </div>
                             ) : isInQueueHere ? (
-                              <div className="flex items-center justify-between gap-1">
-                                <div className="flex-1 py-1.5 rounded-lg bg-amber-950/70 border border-amber-500/40 text-amber-300 text-[10px] font-bold flex items-center justify-center gap-1">
-                                  <Users className="w-3 h-3" />
-                                  <span>Queue #{queueEntry?.queuePosition} • ~{queueEntry?.estimatedWaitMins}m wait</span>
+                              <div className="flex flex-col gap-1">
+                                <div className="py-1.5 rounded-lg bg-amber-950/70 border border-amber-500/40 text-amber-300 text-[9px] font-bold flex items-center justify-center gap-1">
+                                  <Users className="w-2.5 h-2.5" />
+                                  <span>Q#{queueEntry?.queuePosition} ~{queueEntry?.estimatedWaitMins}m</span>
                                 </div>
                                 <button
                                   onClick={handleCancelQueue}
-                                  className="text-[9px] text-rose-400 hover:text-rose-300 underline px-1 flex-shrink-0"
+                                  className="text-[9px] text-rose-400 hover:text-rose-300 underline text-center"
                                 >
                                   Cancel
                                 </button>
@@ -498,16 +574,16 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
                               <button
                                 onClick={() => handleBookNow(station, bay, ai.aiStatus as 'book-now' | 'reserve-ahead')}
                                 disabled={isProcessing || isAnotherProcessing}
-                                className="w-full py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-[10px] uppercase tracking-wider shadow-md shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-[9px] uppercase tracking-wider shadow-md shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {isProcessing ? (
                                   <>
-                                    <Activity className="w-3 h-3 animate-spin" />
-                                    <span>Reserving...</span>
+                                    <Activity className="w-2.5 h-2.5 animate-spin" />
+                                    <span>Reserving…</span>
                                   </>
                                 ) : (
                                   <>
-                                    <PlugZap className="w-3 h-3" />
+                                    <PlugZap className="w-2.5 h-2.5" />
                                     <span>Book Slot</span>
                                   </>
                                 )}
@@ -516,16 +592,16 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
                               <button
                                 onClick={() => handleJoinQueue(station, bay, ai.estimatedWaitMins)}
                                 disabled={isProcessing || isAnotherProcessing || queueEntry !== null}
-                                className="w-full py-1.5 rounded-lg bg-gradient-to-r from-violet-700 to-purple-600 hover:from-violet-600 hover:to-purple-500 text-white font-bold text-[10px] uppercase tracking-wider shadow-md shadow-violet-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full py-1.5 rounded-lg bg-gradient-to-r from-violet-700 to-purple-600 hover:from-violet-600 hover:to-purple-500 text-white font-bold text-[9px] uppercase tracking-wider shadow-md shadow-violet-500/20 active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {isProcessing ? (
                                   <>
-                                    <Activity className="w-3 h-3 animate-spin" />
-                                    <span>Joining...</span>
+                                    <Activity className="w-2.5 h-2.5 animate-spin" />
+                                    <span>Joining…</span>
                                   </>
                                 ) : (
                                   <>
-                                    <Users className="w-3 h-3" />
+                                    <Users className="w-2.5 h-2.5" />
                                     <span>Join Queue</span>
                                   </>
                                 )}
@@ -569,7 +645,7 @@ export const ScreenChargingSlot: React.FC<ScreenChargingSlotProps> = ({
                   </button>
                 </div>
                 <div className="text-[10px] text-violet-300/80 mt-1 truncate">
-                  Station: {stationList.find(s => s.id === queueEntry.stationId)?.stationName} • Bay: {queueEntry.bayId}
+                  Station: {stationList.find(s => s.id === queueEntry.stationId)?.stationName} • Slot: {bayDisplayLabel(queueEntry.bayId)}
                 </div>
               </div>
             )}
